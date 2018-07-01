@@ -16,6 +16,7 @@ export interface Database<T> {
   removeMulti: (query: Partial<T & Id>) => Promise<void>
   update: (query: Partial<T & Id>, item: Partial<T>) => Promise<void>
   upsert: (query: Partial<T & Id>, item: Partial<T>) => Promise<void>
+  setIndex(field: keyof T): void
 }
 
 const cache: { [key: string]: Nedb & any } = {}
@@ -45,5 +46,11 @@ export function Database<T>(name: string): Database<T> {
     removeMulti: query => db.removeAsync(query, { multi: true }),
     update: (query, item) => db.updateAsync(query, item),
     upsert: (query, item) => db.updateAsync(query, item, { upsert: true }),
+    setIndex(field) {
+      db.ensureIndex({
+        filename: field,
+        unique: true,
+      })
+    },
   }
 }

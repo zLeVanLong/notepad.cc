@@ -27,9 +27,9 @@ exports.wsServer.on('connection', function (socket) {
     socket.on('save', async function (msg, reply) {
         console.info(`saving note for: ${msg.id}`);
         try {
-            const notification = await note_1.noteService.upsert(msg);
+            const update = await note_1.noteService.upsert(msg);
             reply({});
-            socket.to(msg.id).broadcast.emit('updated note', notification);
+            socket.to(msg.id).broadcast.emit('note_update', update);
         }
         catch (error) {
             console.warn(error);

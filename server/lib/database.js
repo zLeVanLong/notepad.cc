@@ -27,6 +27,12 @@ function Database(name) {
         removeMulti: query => db.removeAsync(query, { multi: true }),
         update: (query, item) => db.updateAsync(query, item),
         upsert: (query, item) => db.updateAsync(query, item, { upsert: true }),
+        setIndex(field) {
+            db.ensureIndex({
+                filename: field,
+                unique: true,
+            });
+        },
     };
 }
 exports.Database = Database;

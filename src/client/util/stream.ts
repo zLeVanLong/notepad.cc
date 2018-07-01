@@ -3,8 +3,8 @@ interface StreamListener<T> {
 }
 
 interface StreamDependent<T> {
-  updateDependent(val: T): void
-  flushDependent(): void
+  update(val: T): void
+  flush(): void
 }
 
 // dirty workaround as typescript does not support callable class for now
@@ -13,10 +13,17 @@ interface StreamCallable<T> {
   (): T
 }
 
+enum StreamState {
+  Initial,
+  Started,
+  Ended,
+  Errored,
+}
+
 class StreamClass<T> {
   private listeners: StreamListener<T>[] = []
   private dependents: StreamDependent<T>[] = []
-  private started: boolean = false
+  private state: StreamState = StreamState.Initial
   private value: T | undefined = undefined
   private changed: boolean = false
 
@@ -27,12 +34,16 @@ class StreamClass<T> {
       if (typeof val === 'undefined') {
         return stream$.value
       } else {
-        stream$.started = true
+        if (stream$.state === StreamState.Initial) {
+          stream$.state = StreamState.Started
+        }
         stream$.update(val)
         stream$.flush()
       }
     } as Stream<T>
-    stream$.started = !(typeof init === 'undefined')
+    if (typeof init === 'undefined') {
+      stream$.state = StreamState.Started
+    }
     stream$.value = init
     stream$.changed = false
     stream$.listeners = []
@@ -66,13 +77,13 @@ class StreamClass<T> {
 
     streams.forEach((stream, i) => {
       stream.dependents.push({
-        updateDependent(val: any) {
+        update(val: any) {
           cached[i] = val
           if (allHasValue(cached)) {
             combined$.update(combiner(...cached))
           }
         },
-        flushDependent() {
+        flush() {
           combined$.flush()
         },
       })
@@ -101,29 +112,34 @@ class StreamClass<T> {
     return interval$
   }
 
-  static fromEvent<K extends keyof HTMLElementEventMap>(
+  static fromEvent<K extends keyof HTMLElementEventMap | string>(
     elem: HTMLElement,
     type: K
-  ): Stream<HTMLElementEventMap[K]> {
-    const event$ = Stream<HTMLElementEventMap[K]>()
+  ): Stream<
+    K extends keyof HTMLElementEventMap ? HTMLElementEventMap[K] : any
+  > {
+    type ValueType = K extends keyof HTMLElementEventMap
+      ? HTMLElementEventMap[K]
+      : any
+    const event$ = Stream<ValueType>()
     elem.addEventListener(type, event$)
     return event$
   }
 
   private update(val: T) {
     this.value = val
-    this.started = true
+    this.state = StreamState.Started
     this.changed = true
-    this.dependents.forEach(dep => dep.updateDependent(val))
+    this.dependents.forEach(dep => dep.update(val))
   }
 
   private flush() {
     if (this.changed) {
       this.changed = false
-      if (this.started) {
+      if (this.state === StreamState.Started) {
         this.listeners.forEach(l => l(this.value as T))
       }
-      this.dependents.forEach(dep => dep.flushDependent())
+      this.dependents.forEach(dep => dep.flush())
     }
   }
 
@@ -132,7 +148,7 @@ class StreamClass<T> {
   }
 
   subscribe(listener: StreamListener<T>, emitOnSubscribe?: boolean): this {
-    if (emitOnSubscribe && this.started) {
+    if (emitOnSubscribe && this.state === StreamState.Started) {
       listener(this.value as T)
     }
     this.listeners.push(listener)
@@ -148,6 +164,12 @@ class StreamClass<T> {
 
   map<V>(mapper: (val: T) => V): Stream<V> {
     return Stream.combine<T, V>(mapper, [this.asStream()])
+  }
+
+  startWith(x: T): Stream<T> {
+    const stream$ = Stream(x)
+    this.subscribe(val => stream$(val))
+    return stream$
   }
 
   unique(): Stream<T> {

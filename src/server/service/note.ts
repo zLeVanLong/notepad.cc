@@ -1,7 +1,7 @@
 import randomstring from 'randomstring'
 import hashString from 'string-hash'
 import { Database } from '../lib/database'
-import { applyPatch, Patch } from '../lib/diff3'
+import { Patch, applyPatch } from '../lib/diff3'
 
 const NOTE_MAX_SIZE = 100000
 

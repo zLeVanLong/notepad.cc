@@ -1,7 +1,7 @@
 import m from 'mithril'
 import { Component } from 'mithril/index'
 import hashString from 'string-hash'
-import { applyPatch, createPatch, merge3, PatchCompressed } from '../util/diff3'
+import { PatchCompressed, applyPatch, createPatch, merge3 } from '../util/diff3'
 import { Stream } from '../util/stream'
 
 interface NoteError {
@@ -13,6 +13,13 @@ export interface EditorProps {
   socket: SocketIOClient.Socket
   onStatusChange: (...arg: any[]) => void
 }
+
+const UNIQUE_CARET = '\u0000'
+
+const verify = (str: string, hash: number): boolean => {
+  return str != null && hashString(str) === hash
+}
+
 export const Editor: Component<EditorProps> = {
   oncreate({ dom, attrs: { id, socket, onStatusChange } }): void {
     const $editor = dom as HTMLTextAreaElement
@@ -23,7 +30,7 @@ export const Editor: Component<EditorProps> = {
 
     const isRemoteNoteStale$ = remoteNote$.map(() => false)
 
-    const isNotCompositing$ = compositingStream()
+    const isNotCompositing$ = compositingStream($editor)
       .unique()
       .map(comp => !comp)
 
@@ -34,7 +41,7 @@ export const Editor: Component<EditorProps> = {
     const shouldSave$ = input$.debounce(500).map(() => null)
     const isSaving$ = Stream(false)
 
-    const editorDirty$ = editorDirtyStream()
+    const isEditorDirty$ = editorDirtyStream()
 
     //------ listeners --------
     keydown$.subscribe(mutateContentOnKeydown)
@@ -53,7 +60,7 @@ export const Editor: Component<EditorProps> = {
 
     isSaving$.unique().subscribe(onStatusChange)
 
-    editorDirty$.subscribe(setBeforeunloadPrompt)
+    isEditorDirty$.subscribe(setBeforeUnloadPrompt)
 
     //------- trigger fist fetch ---------
     isRemoteNoteStale$(true)
@@ -91,7 +98,7 @@ export const Editor: Component<EditorProps> = {
       const remoteNote$ = Stream($editor.value)
 
       socket.on(
-        'updated note',
+        'note_update',
         ({ h: hash, p: patch }: { h: number; p: PatchCompressed }) => {
           const newNote = applyPatch(remoteNote$(), patch)
           if (verify(newNote, hash)) {
@@ -150,16 +157,14 @@ export const Editor: Component<EditorProps> = {
       }
 
       function getNextCaretPos(prev: string, next: string) {
-        const caretSymbol = genUniqCaret(next, prev)
         const prevCaretPos = $editor.selectionStart
         const prevWithCaret =
-          '' +
           prev.substring(0, prevCaretPos) +
-          caretSymbol +
+          UNIQUE_CARET +
           prev.substring(prevCaretPos, prev.length)
         const nextWithCaret = merge3(next, prev, prevWithCaret)
         return nextWithCaret != null
-          ? nextWithCaret.indexOf(caretSymbol)
+          ? nextWithCaret.indexOf(UNIQUE_CARET)
           : next.length
       }
     }
@@ -192,15 +197,16 @@ export const Editor: Component<EditorProps> = {
       }
     }
 
-    function compositingStream() {
-      const compositing$ = Stream(false)
-      $editor.addEventListener('compositionstart', e => {
-        compositing$(true)
-      })
-      $editor.addEventListener('compositionend', e => {
-        compositing$(false)
-      })
-      return compositing$
+    function compositingStream(elem: HTMLElement): Stream<boolean> {
+      const compositionStart$ = Stream.fromEvent(elem, 'compositionstart')
+      const compositionEnd$ = Stream.fromEvent(elem, 'compositionstart')
+      const compositing$ = Stream.merge([
+        compositionStart$.map(() => true),
+        compositionEnd$.map(() => false),
+      ])
+        .startWith(false)
+        .unique()
+      return compositing$.log('comp')
     }
 
     function editorDirtyStream() {
@@ -217,7 +223,7 @@ export const Editor: Component<EditorProps> = {
       return confirmationMessage // Gecko, WebKit, Chrome <34
     }
 
-    function setBeforeunloadPrompt(isDirty: boolean) {
+    function setBeforeUnloadPrompt(isDirty: boolean) {
       if (isDirty) {
         window.addEventListener('beforeunload', beforeunloadPrompt)
       } else {
@@ -236,15 +242,4 @@ export const Editor: Component<EditorProps> = {
       '(Loading...)'
     )
   },
-}
-
-// --------- helpers -----------
-
-function genUniqCaret(...strs: string[]): string {
-  let caretList = ['☠', '☮', '☯', '♠', '\u0000'] // i don't think any one will use last one
-  return caretList.find(v => strs.every(str => !str.includes(v))) as string
-}
-
-function verify(str: string, hash: number): boolean {
-  return str != null && hashString(str) === hash
 }
